@@ -12,9 +12,6 @@ import (
 // Example:
 // - 5:hello -> hello
 // - 10:hello12345 -> hello12345
-func decodeBencode(bencodedString string) (interface{}, error) {
-	return bencode.Decode(strings.NewReader((bencodedString)))
-}
 
 func main() {
 
@@ -23,7 +20,7 @@ func main() {
 	if command == "decode" {
 		bencodedValue := os.Args[2]
 		
-		decoded, err := decodeBencode(bencodedValue)
+		decoded, err := bencode.Decode(strings.NewReader((bencodedValue)))
 		if err != nil {
 			fmt.Println(err)
 			return
