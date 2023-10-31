@@ -5,6 +5,7 @@ import (
 	// "encoding/json"
 	"bytes"
 	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,14 +19,30 @@ import (
 // - 5:hello -> hello
 // - 10:hello12345 -> hello12345
 type Torrent struct {
-	Announce string      `json:"announce"`
-	Info     TorrentInfo `json:"info"`
+	Announce string      "announce"
+	Info     TorrentInfo "info"
 }
 type TorrentInfo struct {
-	Length      int    `json:"length"`
-	Name        string `json:"name"`
-	PieceLength int    `json:"piece length"`
-	Pieces      string `json:"pieces"`
+	Length      int    "length"
+	Name        string "name"
+	PieceLength int    "piece length"
+	Pieces      string "pieces"
+}
+
+func splitBytes(input []byte, chunkSize int) [][]byte {
+    if chunkSize <= 0 {
+        return nil
+    }
+
+    var result [][]byte
+    for i := 0; i < len(input); i += chunkSize {
+        end := i + chunkSize
+        if end > len(input) {
+            end = len(input)
+        }
+        result = append(result, input[i:end])
+    }
+    return result
 }
 
 // ReadFileContent reads and returns the content of a file.
@@ -90,11 +107,19 @@ func main() {
 			fmt.Println(err)
 			return
 		}
-
 		sum := sha1.Sum(buf.Bytes())
+
+		bytesChunk := splitBytes([]byte(t.Info.Pieces), 20)
+
 		fmt.Println("Tracker URL:", t.Announce)
 		fmt.Println("Length:", t.Info.Length)
 		fmt.Printf("Info Hash: %x\n", sum)
+		fmt.Println("Piece Length:", t.Info.PieceLength)
+		fmt.Println("Piece Hashes:")
+		for _, chunk := range bytesChunk {
+			fmt.Println(string(hex.EncodeToString(chunk)))
+		}
+
 	default:
 		fmt.Println("Unknown command: " + command)
 	}
