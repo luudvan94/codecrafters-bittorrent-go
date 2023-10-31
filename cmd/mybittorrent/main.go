@@ -13,8 +13,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
-	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
+
+	bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
 
 // Example:
@@ -172,7 +172,7 @@ func main() {
 	switch command {
 	case "decode":
 		bencodedValue := os.Args[2]
-		decoded, _, err := decodeBencode(bencodedValue)
+		decoded, err := bencode.Decode(strings.NewReader(bencodedValue))
 		if err != nil {
 			fmt.Println(err)
 			return
