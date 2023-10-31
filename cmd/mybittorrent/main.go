@@ -212,7 +212,7 @@ func main() {
 		sum := sha1.Sum([]byte(encodedInfo))
 		fmt.Println("Tracker URL:", t.Announce)
 		fmt.Println("Length:", t.Info.Length)
-		fmt.Printf("Info Hash: %s\n", hex.EncodeToString(sum[:]))
+		fmt.Printf("Info Hash: %s", hex.EncodeToString(sum[:]))
 	default:
 		fmt.Println("Unknown command: " + command)
 	}
