@@ -3,33 +3,69 @@ package main
 import (
 	// Uncomment this line to pass the first stage
 	// "encoding/json"
+
 	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
-	bencode "github.com/jackpal/bencode-go" // Available if you need it!
+	bencode "github.com/jackpal/bencode-go"
+	// Available if you need it!
 )
 
 // Example:
 // - 5:hello -> hello
 // - 10:hello12345 -> hello12345
 type Torrent struct {
-	Announce string      "announce"
-	Info     TorrentInfo "info"
+	Announce string      `bencode:"announce"`
+	Info     TorrentInfo `bencode:"info"`
 }
 type TorrentInfo struct {
-	Length      int    "length"
-	Name        string "name"
-	PieceLength int    "piece length"
-	Pieces      string "pieces"
+	Length      int    `bencode:"length"`
+	Name        string `bencode:"name"`
+	PieceLength int    `bencode:"piece length"`
+	Pieces      string `bencode:"pieces"`
 }
 
-func splitBytes(input []byte, chunkSize int) [][]byte {
+type GetPeersResponse struct {
+	Interval 	int 	`bencode:"interval"`
+	Peers 		string	`bencode:"peers"`
+}
+
+func (r GetPeersResponse) PeersAddr() []string {
+	var peerList []string
+	peerInfo := r.Peers
+    // Check that the peerInfo string has a length that is a multiple of 6 (each peer entry is 6 bytes)
+    if len(peerInfo)%6 != 0 {
+        fmt.Println("Invalid peer information length")
+        return peerList
+    }
+
+    // Split the peerInfo string into 6-byte segments
+    for i := 0; i < len(peerInfo); i += 6 {
+        ipBytes := peerInfo[i : i+4]
+        portBytes := peerInfo[i+4 : i+6]
+
+        // Convert the 4-byte IP address and 2-byte port number to their respective values
+        ip := net.IP(ipBytes)
+        port := int(portBytes[0])<<8 + int(portBytes[1])
+
+        // Create the formatted peer string
+        peerStr := fmt.Sprintf("%s:%d", ip.String(), port)
+        peerList = append(peerList, peerStr)
+    }
+
+    return peerList
+}
+
+func SplitBytes(input []byte, chunkSize int) [][]byte {
     if chunkSize <= 0 {
         return nil
     }
@@ -45,25 +81,80 @@ func splitBytes(input []byte, chunkSize int) [][]byte {
     return result
 }
 
-// ReadFileContent reads and returns the content of a file.
-func ReadFileContent(filePath string) (string, error) {
-	// Open the file for reading
-	file, err := os.Open(filePath)
+func ParseTorrentFile(fileName string) (Torrent, error) {
+	contentBytes, err := os.ReadFile(fileName)
 	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	// Read the file content
-	content, err := io.ReadAll(file)
-	if err != nil {
-		return "", err
+		return Torrent{}, err
 	}
 
-	// Convert the content to a string
-	fileContent := string(content)
+	t := Torrent{}
+	err = bencode.Unmarshal(strings.NewReader(string(contentBytes)), &t)
+	if err != nil {
+		return Torrent{}, err
+	}
 
-	return fileContent, nil
+	return t, nil
+}
+
+func CalculateInfoHash(info TorrentInfo) ([]byte, error) {
+	var s = sha1.New()
+	err := bencode.Marshal(s, info)
+	if err != nil {
+		return []byte{}, err
+	}
+
+	return s.Sum(nil), nil
+}
+
+func GetPeers(torrent Torrent) (GetPeersResponse, error) {
+	baseUrl, err := url.Parse(torrent.Announce)
+	if err != nil {
+		fmt.Println("Error parsing URL:", err)
+		return GetPeersResponse{}, err
+	}
+
+	infoHash, err := CalculateInfoHash(torrent.Info)
+	if err != nil {
+		fmt.Println("Error calculating info hash:", err)
+		return GetPeersResponse{}, err
+	}
+
+	q := baseUrl.Query()
+	q.Add("info_hash", string(infoHash))
+	q.Add("peer_id", "11112233445566778899")
+	q.Add("port", "6881")
+	q.Add("uploaded", "0")
+	q.Add("downloaded", "0")
+	q.Add("left", fmt.Sprintf("%d", torrent.Info.Length))
+	q.Add("compact", "1")
+	baseUrl.RawQuery = q.Encode()
+
+	resp, err := http.Get(baseUrl.String())
+	if err != nil {
+		fmt.Println("Error sending request:", err)
+		return GetPeersResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("Request failed with status: %s\n", resp.Status)
+		return GetPeersResponse{}, nil
+	}
+
+	content, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error reading response:", err)
+		return GetPeersResponse{}, err
+	}
+
+	var getPeersResponse GetPeersResponse
+	err = bencode.Unmarshal(bytes.NewReader(content), &getPeersResponse)
+	if err != nil {
+		fmt.Println("Error parsing response:", err)
+		return GetPeersResponse{}, err
+	}
+	
+	return getPeersResponse, nil
 }
 
 func main() {
@@ -81,44 +172,49 @@ func main() {
 		jsonOutput, _ := json.Marshal(decoded)
 		fmt.Println(string(jsonOutput))
 	case "info":
-		torrentFilePath := os.Args[2]
-		contentBytes, err := os.ReadFile(torrentFilePath)
-		if err != nil {
-			fmt.Println(err)
-		}
-		t := Torrent{}
-		bencodedValue := string(contentBytes)
-		bencode.Unmarshal(strings.NewReader(bencodedValue), &t)
-		decoded, err := bencode.Decode(strings.NewReader(bencodedValue))
+		torrentFileName := os.Args[2]
+		t, err := ParseTorrentFile(torrentFileName)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 
-		decodedDict, ok := decoded.(map[string]interface{})
-		if (!ok) {
-			fmt.Println("error parsing decoded")
-			return
-		}
-
-		var buf bytes.Buffer
-		err = bencode.Marshal(&buf, decodedDict["info"])
+		hash, err := CalculateInfoHash(t.Info)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		sum := sha1.Sum(buf.Bytes())
 
-		bytesChunk := splitBytes([]byte(t.Info.Pieces), 20)
+		bytesChunk := SplitBytes([]byte(t.Info.Pieces), 20)
 
 		fmt.Println("Tracker URL:", t.Announce)
 		fmt.Println("Length:", t.Info.Length)
-		fmt.Printf("Info Hash: %x\n", sum)
+		fmt.Printf("Info Hash: %x\n", hash)
 		fmt.Println("Piece Length:", t.Info.PieceLength)
 		fmt.Println("Piece Hashes:")
 		for _, chunk := range bytesChunk {
 			fmt.Println(string(hex.EncodeToString(chunk)))
 		}
+	case "peers":
+		torrentFileName := os.Args[2]
+		t, err := ParseTorrentFile(torrentFileName)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		peers, err := GetPeers(t) 
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		
+		peerAddrs := peers.PeersAddr()
+		
+		for _, addr := range peerAddrs {
+			fmt.Println(addr)
+		}
+		return
 
 	default:
 		fmt.Println("Unknown command: " + command)
