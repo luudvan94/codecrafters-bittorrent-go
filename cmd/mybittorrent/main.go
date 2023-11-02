@@ -39,8 +39,17 @@ type GetPeersResponse struct {
 	Peers 		string	`bencode:"peers"`
 }
 
-func (r GetPeersResponse) PeersAddr() []string {
-	var peerList []string
+type IPAddress struct {
+	IP			string
+	Port		int
+}
+
+type HandShakeResponse struct {
+	PeerID		[]byte
+}
+
+func (r GetPeersResponse) PeersAddr() []IPAddress {
+	var peerList []IPAddress
 	peerInfo := r.Peers
     // Check that the peerInfo string has a length that is a multiple of 6 (each peer entry is 6 bytes)
     if len(peerInfo)%6 != 0 {
@@ -58,7 +67,7 @@ func (r GetPeersResponse) PeersAddr() []string {
         port := int(portBytes[0])<<8 + int(portBytes[1])
 
         // Create the formatted peer string
-        peerStr := fmt.Sprintf("%s:%d", ip.String(), port)
+        peerStr := IPAddress{IP: ip.String(), Port: port}
         peerList = append(peerList, peerStr)
     }
 
@@ -96,14 +105,19 @@ func ParseTorrentFile(fileName string) (Torrent, error) {
 	return t, nil
 }
 
-func CalculateInfoHash(info TorrentInfo) ([]byte, error) {
+func CalculateInfoHash(info TorrentInfo) ([20]byte, error) {
 	var s = sha1.New()
 	err := bencode.Marshal(s, info)
 	if err != nil {
-		return []byte{}, err
+		return [20]byte{}, err
 	}
 
-	return s.Sum(nil), nil
+	hashBytes := s.Sum(nil)
+
+	var hash [20]byte
+	copy(hash[:], hashBytes)
+
+	return hash, nil
 }
 
 func GetPeers(torrent Torrent) (GetPeersResponse, error) {
@@ -120,7 +134,7 @@ func GetPeers(torrent Torrent) (GetPeersResponse, error) {
 	}
 
 	q := baseUrl.Query()
-	q.Add("info_hash", string(infoHash))
+	q.Add("info_hash", hex.EncodeToString(infoHash[:]))
 	q.Add("peer_id", "11112233445566778899")
 	q.Add("port", "6881")
 	q.Add("uploaded", "0")
@@ -155,6 +169,70 @@ func GetPeers(torrent Torrent) (GetPeersResponse, error) {
 	}
 	
 	return getPeersResponse, nil
+}
+
+
+func ParseHandshakeResponse(conn net.Conn) (HandShakeResponse, error) {
+	// Read the handshake response from the remote peer
+	handshakeResponse := make([]byte, 68) // Assuming a fixed-size response
+	_, err := conn.Read(handshakeResponse)
+	if err != nil {
+		return HandShakeResponse{}, err
+	}
+
+	// Extract information from the handshake response
+	// pstrlen := handshakeResponse[0]           // Length of pstr
+	// pstr := string(handshakeResponse[1:20])   // Protocol identifier (e.g., "BitTorrent protocol")
+	// reserved := handshakeResponse[20:28]     // Reserved bytes
+	// infoHash := handshakeResponse[28:48]     // Info hash (20 bytes)
+	peerID := handshakeResponse[48:68]       // Peer ID (20 bytes)
+
+	// Convert pstrlen to an integer to determine the length of pstr
+	// pstrlenInt := int(pstrlen)
+
+	response := HandShakeResponse{}
+	// fmt.Printf("pstrlen: %d\n", pstrlenInt)
+	// fmt.Printf("pstr: %s\n", pstr)
+	// fmt.Printf("reserved: %v\n", reserved)
+	// fmt.Printf("infoHash: %v\n", infoHash)
+	response.PeerID = peerID
+
+	// Additional processing based on the extracted information can be done here
+
+	return response, nil
+}
+
+func SendHandShake(desAddr string, infoHash [20]byte, peerID string) (HandShakeResponse, error) {
+	conn, err := net.Dial("tcp", desAddr)
+	if err != nil {
+		return HandShakeResponse{}, err
+	}
+	defer conn.Close()
+
+	protocolString := "BitTorrent protocol"
+	var handshake bytes.Buffer
+	handshake.WriteByte(byte(len(protocolString)))
+	handshake.WriteString(protocolString)
+
+	reservedBytes := make([]byte, 8)
+	handshake.Write(reservedBytes)
+	
+	handshake.Write(infoHash[:])
+
+	handshake.Write([]byte(peerID))
+
+	_, err = conn.Write(handshake.Bytes())
+	if err != nil {
+		return HandShakeResponse{}, err
+	}
+
+
+	res, err := ParseHandshakeResponse(conn)
+	if err != nil {
+		return HandShakeResponse{}, err
+	}
+
+	return res, nil
 }
 
 func main() {
@@ -212,8 +290,33 @@ func main() {
 		peerAddrs := peers.PeersAddr()
 		
 		for _, addr := range peerAddrs {
-			fmt.Println(addr)
+			fmt.Printf("%s:%d\n", addr.IP, addr.Port)
 		}
+		return
+
+	case "handshake":
+		torrentFileName := os.Args[2]
+		t, err := ParseTorrentFile(torrentFileName)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		peerAddr := os.Args[3]
+
+		infoHash, err := CalculateInfoHash(t.Info)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		res, err := SendHandShake(peerAddr, infoHash, "00112233445566778899")
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		fmt.Printf("Peer ID: %x\n", res.PeerID)
 		return
 
 	default:
