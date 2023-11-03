@@ -105,19 +105,16 @@ func ParseTorrentFile(fileName string) (Torrent, error) {
 	return t, nil
 }
 
-func CalculateInfoHash(info TorrentInfo) ([20]byte, error) {
+func CalculateInfoHash(info TorrentInfo) ([]byte, error) {
 	var s = sha1.New()
 	err := bencode.Marshal(s, info)
 	if err != nil {
-		return [20]byte{}, err
+		return []byte{}, err
 	}
 
 	hashBytes := s.Sum(nil)
 
-	var hash [20]byte
-	copy(hash[:], hashBytes)
-
-	return hash, nil
+	return hashBytes, nil
 }
 
 func GetPeers(torrent Torrent) (GetPeersResponse, error) {
@@ -134,7 +131,7 @@ func GetPeers(torrent Torrent) (GetPeersResponse, error) {
 	}
 
 	q := baseUrl.Query()
-	q.Add("info_hash", hex.EncodeToString(infoHash[:]))
+	q.Add("info_hash", string(infoHash))
 	q.Add("peer_id", "11112233445566778899")
 	q.Add("port", "6881")
 	q.Add("uploaded", "0")
@@ -202,7 +199,7 @@ func ParseHandshakeResponse(conn net.Conn) (HandShakeResponse, error) {
 	return response, nil
 }
 
-func SendHandShake(desAddr string, infoHash [20]byte, peerID string) (HandShakeResponse, error) {
+func SendHandShake(desAddr string, infoHash []byte, peerID string) (HandShakeResponse, error) {
 	conn, err := net.Dial("tcp", desAddr)
 	if err != nil {
 		return HandShakeResponse{}, err
@@ -286,7 +283,7 @@ func main() {
 			fmt.Println(err)
 			return
 		}
-		
+
 		peerAddrs := peers.PeersAddr()
 		
 		for _, addr := range peerAddrs {
