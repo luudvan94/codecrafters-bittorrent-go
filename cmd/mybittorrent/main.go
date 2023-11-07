@@ -332,7 +332,7 @@ func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([
 	// fmt.Printf("%d %d\n", pieceLength, pieceLength / blockSize)
 	// numBlocks := (pieceLength + blockSize - 1) / blockSize
 	requestMessages := make([][]byte, 0)
-
+	fmt.Printf("piece-index: %d piece-length: %d ", pieceIndex, pieceLength)
 	for i := 0; i < pieceLength; i += blockSize {
 		length := blockSize
 		if i+blockSize > pieceLength {
