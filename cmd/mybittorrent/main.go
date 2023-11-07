@@ -329,12 +329,11 @@ func (cli TorrentClient) createMessage(messageID byte, payload []byte) []byte {
 func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([][]byte) {
 	
 	blockSize := 16 * 1024 // 16 KiB
-	fmt.Printf("%d %d\n", pieceLength, pieceLength / blockSize)
+	// fmt.Printf("%d %d\n", pieceLength, pieceLength / blockSize)
 	// numBlocks := (pieceLength + blockSize - 1) / blockSize
 	requestMessages := make([][]byte, 0)
 
 	for i := 0; i < pieceLength; i += blockSize {
-		fmt.Printf("%d\n", i)
 		length := blockSize
 		if i+blockSize > pieceLength {
 			length = pieceLength - i
@@ -349,7 +348,6 @@ func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([
 
 		requestMessages = append(requestMessages, cli.createMessage(byte(6), message))
 	}
-	fmt.Printf("%d\n", len(requestMessages))
 	return requestMessages
 }
 
@@ -567,18 +565,18 @@ func main() {
 		}
 
 		cli := NewClient("00112233445566778899")
-		_, err = cli.DownloadPiece(peerAddr, infoHash, t.Info, pieceIndex)
+		piece, err := cli.DownloadPiece(peerAddr, infoHash, t.Info, pieceIndex)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 
-		// file, err := os.Create(outputFilePath)
-		// if err != nil {
-		// 	panic(err)
-		// }
-		// defer file.Close()
-		// file.Write(piece.Data)
+		file, err := os.Create(outputFilePath)
+		if err != nil {
+			panic(err)
+		}
+		defer file.Close()
+		file.Write(piece.Data)
 
 		fmt.Printf("Piece %d downloaded to %s\n", pieceIndex, outputFilePath)
 		return
