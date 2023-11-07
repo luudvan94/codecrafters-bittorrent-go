@@ -339,7 +339,6 @@ func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([
 			length = pieceLength - i
 		}
 		begin := i
-		fmt.Printf("begin: %d length: %d \n", begin, length)
 		// Create the request message
 		message := make([]byte, 12) // 4 bytes for length, 1 byte for message ID, 4 bytes for index, 4 bytes for begin, 4 bytes for length                                            // Message ID for "request"
 		binary.BigEndian.PutUint32(message[0:4], uint32(pieceIndex)) // Piece index
@@ -415,7 +414,6 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 		return Piece{}, err
 	}
 	// fmt.Printf("unchoke: %x\n", rawRes)
-	data := make([]byte, info.PieceLength)
 	pieceLength := info.PieceLength
 	length := info.Length
 	// last not whole piece
@@ -423,6 +421,7 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 		pieceLength = length - (pieceLength * pieceIndex)
 	}
 	fmt.Printf("length: %d piece-length: %d \n", info.Length,  pieceLength)
+	data := make([]byte, pieceLength)
 	blockMessages := cli.createBlockMessages(pieceIndex, pieceLength)
 	// fmt.Printf("block msg count: %d\n", len(blockMessages))
 	// fmt.Printf("piece length: %d\n", info.PieceLength)
@@ -450,8 +449,8 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 	// pieceHash := cli.calculatePieceHash(data)
 	// fmt.Printf("%x\n", SplitBytes([]byte(info.Pieces), 20)[0])
 	// fmt.Printf("piece: %x\n", pieceHash)
-	// fmt.Printf("piece length: %d\n", info.PieceLength)
-	// fmt.Printf("data length: %d\n", len(data))
+	fmt.Printf("piece length: %d\n", info.PieceLength)
+	fmt.Printf("data length: %d\n", len(data))
 	// fmt.Printf("data: %x\n", data)
 	// fmt.Println("here4")
 	
