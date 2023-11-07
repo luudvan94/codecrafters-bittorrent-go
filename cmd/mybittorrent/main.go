@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -265,6 +266,25 @@ func (cli TorrentClient) readResponse(conn net.Conn, result []byte) ([]byte, err
 	return result, nil
 }
 
+func (cli TorrentClient) readMessage(conn net.Conn) (byte, []byte, error) {
+	lengthBytes := make([]byte, 4)
+	if _, err := cli.readResponse(conn, lengthBytes); err != nil {
+		return 0, nil, err
+	}
+	length := binary.BigEndian.Uint32(lengthBytes)
+	messageType := make([]byte, 1)
+	if _, err := cli.readResponse(conn, messageType); err != nil {
+		return 0, nil, err
+	}
+	length--
+	message := make([]byte, length)
+	if _, err := io.ReadAtLeast(conn, message, int(length)); err != nil {
+		return 0, nil, err
+	}
+
+	return messageType[0], message, nil
+}
+
 func (cli TorrentClient) HandSHake(desAddr string, infoHash []byte) (HandShakeResponse, error) {
 	conn, err := cli.openConnection("tcp", desAddr)
 	if err != nil {
@@ -307,11 +327,14 @@ func (cli TorrentClient) createMessage(messageID byte, payload []byte) []byte {
 }
 
 func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([][]byte) {
+	
 	blockSize := 16 * 1024 // 16 KiB
-	numBlocks := (pieceLength + blockSize - 1) / blockSize
-	requestMessages := make([][]byte, numBlocks)
+	fmt.Printf("%d %d\n", pieceLength, pieceLength / blockSize)
+	// numBlocks := (pieceLength + blockSize - 1) / blockSize
+	requestMessages := make([][]byte, 0)
 
 	for i := 0; i < pieceLength; i += blockSize {
+		fmt.Printf("%d\n", i)
 		length := blockSize
 		if i+blockSize > pieceLength {
 			length = pieceLength - i
@@ -326,7 +349,7 @@ func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([
 
 		requestMessages = append(requestMessages, cli.createMessage(byte(6), message))
 	}
-
+	fmt.Printf("%d\n", len(requestMessages))
 	return requestMessages
 }
 
@@ -346,6 +369,18 @@ func (cli TorrentClient) calculatePieceHash(pieceData []byte) string {
     return hashString
 }
 
+func (client TorrentClient) ReadPiece(conn net.Conn) (uint32, uint32, []byte, error) {
+	_, message, err := client.readMessage(conn)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+
+	pieceIndex := binary.BigEndian.Uint32(message[0:4])
+	begin := binary.BigEndian.Uint32(message[4:8])
+	block := message[8:]
+	return pieceIndex, begin, block, nil
+}
+
 func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info TorrentInfo, pieceId int) (Piece, error) {
 	conn, err := cli.openConnection("tcp", desAddr)
 	if err != nil {
@@ -362,8 +397,7 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 	if err != nil {
 		return Piece{}, err
 	}
-
-	_, err = cli.readResponse(conn, make([]byte, 10))
+	_,_, err = cli.readMessage(conn)
 	if err != nil {
 		fmt.Println("Not found bitfield message type")
 		return Piece{}, err
@@ -377,13 +411,13 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 		return Piece{}, err
 	}
 
-	_, err = cli.readResponse(conn, make([]byte, 5))
+	_,_, err = cli.readMessage(conn)
 	if err != nil {
 		fmt.Println("Not found unchoke message type")
 		return Piece{}, err
 	}
 	// fmt.Printf("unchoke: %x\n", rawRes)
-	data := make([]byte, 0)
+	data := make([]byte, info.PieceLength)
 	blockMessages := cli.createBlockMessages(pieceId, info.PieceLength)
 	// fmt.Printf("block msg count: %d\n", len(blockMessages))
 	// fmt.Printf("piece length: %d\n", info.PieceLength)
@@ -396,30 +430,25 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 		if err != nil {
 			return Piece{}, err
 		}
-	
-		rawHeader, err := cli.readResponse(conn, make([]byte, 5))
+		
+		recievedPieceIndex, recievedBegin, recievedBlock, err := cli.ReadPiece(conn)
 		if err != nil {
-			fmt.Println("Not found block header")
 			return Piece{}, err
 		}
-		size := binary.BigEndian.Uint32(rawHeader[0:4])
-		size -= 1
-		rawPayload := make([]byte, size)
-		// rawPayload, err := cli.readResponse(conn, make([]byte, size))
-		io.ReadAtLeast(conn, rawPayload, int(size))
-		if err != nil {
-			fmt.Println("Not found payload data")
-			return Piece{}, err
+		if recievedPieceIndex != uint32(pieceId) {
+			return Piece{}, errors.New("mismatched piece index")
 		}
 
-		rawPayload = rawPayload[8:]
-		data = append(data, rawPayload...)
+		copy(data[recievedBegin:], recievedBlock)
 	}
 	
 	// pieceHash := cli.calculatePieceHash(data)
 	// fmt.Printf("%x\n", SplitBytes([]byte(info.Pieces), 20)[0])
 	// fmt.Printf("piece: %x\n", pieceHash)
-
+	// fmt.Printf("piece length: %d\n", info.PieceLength)
+	// fmt.Printf("data length: %d\n", len(data))
+	// fmt.Printf("data: %x\n", data)
+	// fmt.Println("here4")
 	// a
 	return Piece{Data: data}, nil
 }
@@ -528,7 +557,7 @@ func main() {
 			return
 		}
 		
-		peer := peers[1]
+		peer := peers[0]
 		peerAddr := fmt.Sprintf("%s:%d", peer.IP, peer.Port)
 		// var infoHash []byte
 		infoHash, err := t.CalculateInfoHash()
@@ -538,18 +567,18 @@ func main() {
 		}
 
 		cli := NewClient("00112233445566778899")
-		piece, err := cli.DownloadPiece(peerAddr, infoHash, t.Info, pieceIndex)
+		_, err = cli.DownloadPiece(peerAddr, infoHash, t.Info, pieceIndex)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 
-		file, err := os.Create(outputFilePath)
-		if err != nil {
-			panic(err)
-		}
-		defer file.Close()
-		file.Write(piece.Data)
+		// file, err := os.Create(outputFilePath)
+		// if err != nil {
+		// 	panic(err)
+		// }
+		// defer file.Close()
+		// file.Write(piece.Data)
 
 		fmt.Printf("Piece %d downloaded to %s\n", pieceIndex, outputFilePath)
 		return
