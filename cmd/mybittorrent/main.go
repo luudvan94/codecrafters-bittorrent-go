@@ -308,7 +308,7 @@ func (cli TorrentClient) createMessage(messageID byte, payload []byte) []byte {
 
 func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([][]byte) {
 	blockSize := 16 * 1024 // 16 KiB
-	numBlocks := ((pieceLength) / blockSize) + 1
+	numBlocks := (pieceLength + blockSize - 1) / blockSize
 	requestMessages := make([][]byte, numBlocks)
 
 	for i := 0; i < pieceLength; i += blockSize {
@@ -324,7 +324,7 @@ func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([
 		binary.BigEndian.PutUint32(message[4:8], uint32(begin))    // Byte offset within the piece
 		binary.BigEndian.PutUint32(message[8:12], uint32(length))   // Length of the block
 
-		requestMessages[i] = cli.createMessage(byte(6), message)
+		requestMessages = append(requestMessages, cli.createMessage(byte(6), message))
 	}
 
 	return requestMessages
