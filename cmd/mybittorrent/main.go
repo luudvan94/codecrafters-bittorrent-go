@@ -308,7 +308,7 @@ func (cli TorrentClient) createMessage(messageID byte, payload []byte) []byte {
 
 func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([][]byte) {
 	blockSize := 16 * 1024 // 16 KiB
-	numBlocks := (pieceLength + blockSize - 1) / blockSize
+	numBlocks := ((pieceLength) / blockSize) + 1
 	requestMessages := make([][]byte, numBlocks)
 
 	for i := 0; i < pieceLength; i += blockSize {
