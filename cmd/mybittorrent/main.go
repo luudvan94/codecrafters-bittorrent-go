@@ -379,7 +379,7 @@ func (client TorrentClient) ReadPiece(conn net.Conn) (uint32, uint32, []byte, er
 	return pieceIndex, begin, block, nil
 }
 
-func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info TorrentInfo, pieceId int) (Piece, error) {
+func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info TorrentInfo, pieceIndex int) (Piece, error) {
 	conn, err := cli.openConnection("tcp", desAddr)
 	if err != nil {
 		return Piece{}, err
@@ -417,11 +417,13 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 	// fmt.Printf("unchoke: %x\n", rawRes)
 	data := make([]byte, info.PieceLength)
 	pieceLength := info.PieceLength
-	if pieceLength * (pieceId + 1) > info.Length {
-		pieceLength = info.Length - (pieceLength * (pieceId + 1))
+	length := info.Length
+	// last not whole piece
+	if pieceIndex >= int(length/pieceLength) {
+		pieceLength = length - (pieceLength * pieceIndex)
 	}
-	fmt.Printf("length: %d running: %d piece-length: %d", info.Length, pieceLength * (pieceId + 1), pieceLength)
-	blockMessages := cli.createBlockMessages(pieceId, info.PieceLength)
+	fmt.Printf("length: %d piece-length: %d \n", info.Length,  pieceLength)
+	blockMessages := cli.createBlockMessages(pieceIndex, pieceLength)
 	// fmt.Printf("block msg count: %d\n", len(blockMessages))
 	// fmt.Printf("piece length: %d\n", info.PieceLength)
 
@@ -438,7 +440,7 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 		if err != nil {
 			return Piece{}, err
 		}
-		if recievedPieceIndex != uint32(pieceId) {
+		if recievedPieceIndex != uint32(pieceIndex) {
 			return Piece{}, errors.New("mismatched piece index")
 		}
 
