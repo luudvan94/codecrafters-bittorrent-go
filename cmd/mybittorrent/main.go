@@ -332,7 +332,7 @@ func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([
 	// fmt.Printf("%d %d\n", pieceLength, pieceLength / blockSize)
 	// numBlocks := (pieceLength + blockSize - 1) / blockSize
 	requestMessages := make([][]byte, 0)
-	fmt.Printf("piece-index: %d piece-length: %d ", pieceIndex, pieceLength)
+	fmt.Printf("piece-index: %d piece-length: %d \n", pieceIndex, pieceLength)
 	for i := 0; i < pieceLength; i += blockSize {
 		length := blockSize
 		if i+blockSize > pieceLength {
@@ -416,6 +416,11 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 	}
 	// fmt.Printf("unchoke: %x\n", rawRes)
 	data := make([]byte, info.PieceLength)
+	pieceLength := info.PieceLength
+	if pieceLength * (pieceId + 1) > info.Length {
+		pieceLength = info.Length - (pieceLength * (pieceId + 1))
+	}
+	fmt.Printf("length: %d running: %d piece-length: %d", info.Length, pieceLength * (pieceId + 1), pieceLength)
 	blockMessages := cli.createBlockMessages(pieceId, info.PieceLength)
 	// fmt.Printf("block msg count: %d\n", len(blockMessages))
 	// fmt.Printf("piece length: %d\n", info.PieceLength)
