@@ -339,7 +339,7 @@ func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([
 			length = pieceLength - i
 		}
 		begin := i
-
+		fmt.Printf("begin: %d length: %d \n", begin, length)
 		// Create the request message
 		message := make([]byte, 12) // 4 bytes for length, 1 byte for message ID, 4 bytes for index, 4 bytes for begin, 4 bytes for length                                            // Message ID for "request"
 		binary.BigEndian.PutUint32(message[0:4], uint32(pieceIndex)) // Piece index
