@@ -347,7 +347,7 @@ func (cli TorrentClient) calculatePieceHash(pieceData []byte) string {
     return hashString
 }
 
-func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info TorrentInfo) (Piece, error) {
+func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info TorrentInfo, pieceId int) (Piece, error) {
 	conn, err := cli.openConnection("tcp", desAddr)
 	if err != nil {
 		return Piece{}, err
@@ -385,7 +385,7 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 	}
 	// fmt.Printf("unchoke: %x\n", rawRes)
 	data := make([]byte, 0)
-	blockMessages := cli.createBlockMessages(0, info.PieceLength)
+	blockMessages := cli.createBlockMessages(pieceId, info.PieceLength)
 	// fmt.Printf("block msg count: %d\n", len(blockMessages))
 	// fmt.Printf("piece length: %d\n", info.PieceLength)
 
@@ -539,7 +539,7 @@ func main() {
 		}
 
 		cli := NewClient("00112233445566778899")
-		piece, err := cli.DownloadPiece(peerAddr, infoHash, t.Info)
+		piece, err := cli.DownloadPiece(peerAddr, infoHash, t.Info, pieceIndex)
 		if err != nil {
 			fmt.Println(err)
 			return
