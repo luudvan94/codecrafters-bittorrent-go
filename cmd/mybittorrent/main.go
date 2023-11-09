@@ -17,7 +17,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 
 	bencode "github.com/jackpal/bencode-go"
 	// Available if you need it!
@@ -284,7 +283,7 @@ func (cli TorrentClient) readMessage(conn net.Conn) (byte, []byte, error) {
 		return 0, nil, err
 	}
 	length--
-	fmt.Printf("readMessageLength: %d \n", int(length))
+	// fmt.Printf("readMessageLength: %d \n", int(length))
 	message := make([]byte, length)
 	if _, err := io.ReadAtLeast(conn, message, int(length)); err != nil {
 		return 0, nil, err
@@ -380,34 +379,30 @@ func (client TorrentClient) ReadBlock(conn net.Conn) (uint32, uint32, []byte, er
 		return 0, 0, nil, err
 	}
 
-	fmt.Printf("message length: %d \n", len(message))
+	// fmt.Printf("message length: %d \n", len(message))
 	pieceIndex := binary.BigEndian.Uint32(message[0:4])
 	begin := binary.BigEndian.Uint32(message[4:8])
 	block := message[8:]
 	return pieceIndex, begin, block, nil
 }
 
-func (cli TorrentClient) DownloadBlock(conn net.Conn, pieceIndex int, blockMsg []byte, ch chan Block, wg *sync.WaitGroup) {
-	fmt.Printf("Download block (pieceIndex: %d)\n", pieceIndex)
-	defer wg.Done()
+func (cli TorrentClient) DownloadBlock(conn net.Conn, pieceIndex int, blockMsg []byte) (Block, error) {
+	// fmt.Printf("Download block (pieceIndex: %d)\n", pieceIndex)
 
 	err := cli.sendMessage(blockMsg, conn)
 	if err != nil {
-		ch <- Block{}
-		return
+		return Block{}, err
 	}
 	
 	recievedPieceIndex, recievedBlockIndex, block, err := cli.ReadBlock(conn)
 	if err != nil {
-		ch <- Block{}
-		return
+		return Block{}, err
 	}
 	if recievedPieceIndex != uint32(pieceIndex) {
-		ch <- Block{}
-		return
+		return Block{}, err
 	}
-
-	ch <- Block{Data: block, PieceIndex: int(pieceIndex), Index: recievedBlockIndex}
+	
+	return Block{Data: block, PieceIndex: int(pieceIndex), Index: recievedBlockIndex}, nil
 }
 
 func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info TorrentInfo, pieceIndex int) (Piece, error) {
@@ -454,26 +449,30 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 	// fmt.Printf("length: %d piece-length: %d \n", info.Length,  pieceLength)
 	data := make([]byte, pieceLength)
 	blockMessages := cli.createBlockMessages(pieceIndex, pieceLength)
-	blockChan := make(chan Block, cli.maxConcurrency)
-	var wg sync.WaitGroup
-	for i, blockMsg := range blockMessages {
-		wg.Add(1)
-		go cli.DownloadBlock(conn, pieceIndex, blockMsg, blockChan, &wg)
-		if i >= cli.maxConcurrency {
-            <- blockChan
-        }
-	}
-	wg.Wait()
-	close(blockChan)
-
-	for block := range blockChan {
-		// fmt.Printf("piece index: %d block index: %d\n", block.PieceIndex, block.Index)
+	for _, blockMsg := range blockMessages {
+		block, err := cli.DownloadBlock(conn, pieceIndex, blockMsg)
+		if err != nil {
+			return Piece{}, err
+		}
+		
 		copy(data[block.Index:], block.Data)
 	}
-	fmt.Printf("piece length: %d\n", info.PieceLength)
-	fmt.Printf("data length: %d\n", len(data))
+
+	
+	// fmt.Printf("piece length: %d\n", info.PieceLength)
+	// fmt.Printf("data length: %d\n", len(data))
 	// fmt.Printf("data: %x\n", data)
 	// fmt.Println("here4")
+	sha1Hash := sha1.New()
+
+    // Write the input string to the hash object
+    sha1Hash.Write(data)
+
+    // Get the SHA-1 hash as a byte slice
+    hashBytes := sha1Hash.Sum(nil)
+
+    // Convert the byte slice to a hexadecimal string
+    fmt.Printf("Hash: %x\n", hashBytes)
 	
 	return Piece{Data: data}, nil
 }
@@ -617,7 +616,9 @@ func main() {
 			fmt.Println(err)
 			return
 		}
-
+		bytesChunk := SplitBytes([]byte(t.Info.Pieces), 20)
+		fmt.Printf("Piecehash: %x\n", bytesChunk[pieceIndex])
+		fmt.Printf("Pieces: %x\n", t.Info.Pieces)
 		cli := NewClient("00112233445566778899")
 		piece, err := cli.DownloadPiece(peerAddr, infoHash, t.Info, pieceIndex)
 		if err != nil {
