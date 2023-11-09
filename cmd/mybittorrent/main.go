@@ -74,7 +74,7 @@ func NewClient(peerID string) *TorrentClient {
 	return &TorrentClient{
 		peerID:  peerID,
 		connMap: make(map[string]net.Conn),
-		maxConcurrency: 5,
+		maxConcurrency: 2,
 	}
 }
 
