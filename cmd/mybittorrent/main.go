@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,6 +17,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	bencode "github.com/jackpal/bencode-go"
 	// Available if you need it!
@@ -52,12 +52,20 @@ type HandShakeResponse struct {
 }
 
 type TorrentClient struct {
-	peerID  string
-	connMap map[string]net.Conn
+	peerID  			string
+	connMap 			map[string]net.Conn
+	maxConcurrency		int
 }
 
 type Piece struct {
 	Data []byte
+}
+
+type Block struct {
+	Data		[]byte
+	Index		uint32
+	Length		int
+	PieceIndex	int
 }
 
 // NewClient is a constructor function for Client
@@ -65,6 +73,7 @@ func NewClient(peerID string) *TorrentClient {
 	return &TorrentClient{
 		peerID:  peerID,
 		connMap: make(map[string]net.Conn),
+		maxConcurrency: 5,
 	}
 }
 
@@ -366,7 +375,7 @@ func (cli TorrentClient) calculatePieceHash(pieceData []byte) string {
     return hashString
 }
 
-func (client TorrentClient) ReadPiece(conn net.Conn) (uint32, uint32, []byte, error) {
+func (client TorrentClient) ReadBlock(conn net.Conn) (uint32, uint32, []byte, error) {
 	_, message, err := client.readMessage(conn)
 	if err != nil {
 		return 0, 0, nil, err
@@ -376,6 +385,29 @@ func (client TorrentClient) ReadPiece(conn net.Conn) (uint32, uint32, []byte, er
 	begin := binary.BigEndian.Uint32(message[4:8])
 	block := message[8:]
 	return pieceIndex, begin, block, nil
+}
+
+func (cli TorrentClient) DownloadBlock(conn net.Conn, pieceIndex int, blockMsg []byte, ch chan Block, wg *sync.WaitGroup) {
+	fmt.Printf("Download block\n")
+	defer wg.Done()
+
+	err := cli.sendMessage(blockMsg, conn)
+	if err != nil {
+		ch <- Block{}
+		return
+	}
+	
+	recievedPieceIndex, recievedBlockIndex, block, err := cli.ReadBlock(conn)
+	if err != nil {
+		ch <- Block{}
+		return
+	}
+	if recievedPieceIndex != uint32(pieceIndex) {
+		ch <- Block{}
+		return
+	}
+
+	ch <- Block{Data: block, PieceIndex: int(pieceIndex), Index: recievedBlockIndex}
 }
 
 func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info TorrentInfo, pieceIndex int) (Piece, error) {
@@ -399,10 +431,8 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 		fmt.Println("Not found bitfield message type")
 		return Piece{}, err
 	}
-	// fmt.Printf("bitfield: %x\n", bitfieldRaw)
 
 	interestMsg := cli.createMessage(byte(2), []byte{})
-	// fmt.Printf("interest msg: %x\n", interestMsg)
 	err = cli.sendMessage(interestMsg, conn)
 	if err != nil {
 		return Piece{}, err
@@ -413,42 +443,31 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 		fmt.Println("Not found unchoke message type")
 		return Piece{}, err
 	}
-	// fmt.Printf("unchoke: %x\n", rawRes)
+
 	pieceLength := info.PieceLength
 	length := info.Length
-	// last not whole piece
 	if pieceIndex >= int(length/pieceLength) {
 		pieceLength = length - (pieceLength * pieceIndex)
 	}
-	fmt.Printf("length: %d piece-length: %d \n", info.Length,  pieceLength)
+	// fmt.Printf("length: %d piece-length: %d \n", info.Length,  pieceLength)
 	data := make([]byte, pieceLength)
 	blockMessages := cli.createBlockMessages(pieceIndex, pieceLength)
-	// fmt.Printf("block msg count: %d\n", len(blockMessages))
-	// fmt.Printf("piece length: %d\n", info.PieceLength)
-
-	// for _, msg := range blockMessages {
-	// 	fmt.Printf("%x\n", msg)
-	// }
-	for _, blockMsg := range blockMessages {
-		err = cli.sendMessage(blockMsg, conn)
-		if err != nil {
-			return Piece{}, err
-		}
-		
-		recievedPieceIndex, recievedBegin, recievedBlock, err := cli.ReadPiece(conn)
-		if err != nil {
-			return Piece{}, err
-		}
-		if recievedPieceIndex != uint32(pieceIndex) {
-			return Piece{}, errors.New("mismatched piece index")
-		}
-
-		copy(data[recievedBegin:], recievedBlock)
+	blockChan := make(chan Block, cli.maxConcurrency)
+	var wg sync.WaitGroup
+	for i, blockMsg := range blockMessages {
+		wg.Add(1)
+		go cli.DownloadBlock(conn, pieceIndex, blockMsg, blockChan, &wg)
+		if i >= cli.maxConcurrency {
+            <- blockChan
+        }
 	}
-	
-	// pieceHash := cli.calculatePieceHash(data)
-	// fmt.Printf("%x\n", SplitBytes([]byte(info.Pieces), 20)[0])
-	// fmt.Printf("piece: %x\n", pieceHash)
+	wg.Wait()
+	close(blockChan)
+
+	for block := range blockChan {
+		// fmt.Printf("piece index: %d block index: %d\n", block.PieceIndex, block.Index)
+		copy(data[block.Index:], block.Data)
+	}
 	fmt.Printf("piece length: %d\n", info.PieceLength)
 	fmt.Printf("data length: %d\n", len(data))
 	// fmt.Printf("data: %x\n", data)
