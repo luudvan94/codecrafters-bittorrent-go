@@ -58,7 +58,8 @@ type TorrentClient struct {
 }
 
 type Piece struct {
-	Data []byte
+	Data 		[]byte
+	PieceIndex	int
 }
 
 type Block struct {
@@ -221,24 +222,21 @@ func (cli TorrentClient) parseHandshakeResponse(handshakeResponse []byte) (HandS
 }
 
 func (cli TorrentClient) openConnection(protocol string, addr string) (net.Conn, error) {
-	if conn, exists := cli.connMap[addr]; exists {
-		return conn, nil
-	}
+	// if conn, exists := cli.connMap[addr]; exists {
+	// 	return conn, nil
+	// }
 
 	conn, err := net.Dial(protocol, addr)
 	if err != nil {
 		return nil, err
 	}
-	cli.connMap[addr] = conn
+	// cli.connMap[addr] = conn
 
 	return conn, nil
 }
 
-func (cli TorrentClient) closeConnection(addr string) {
-	if conn, exists := cli.connMap[addr]; exists {
-		conn.Close()
-	}
-
+func (cli TorrentClient) closeConnection(conn net.Conn) {
+	conn.Close()
 }
 
 func (cli TorrentClient) handshakeMessage(infoHash []byte) []byte {
@@ -299,7 +297,7 @@ func (cli TorrentClient) HandSHake(desAddr string, infoHash []byte) (HandShakeRe
 	if err != nil {
 		return HandShakeResponse{}, err
 	}
-	defer cli.closeConnection(desAddr)
+	defer cli.closeConnection(conn)
 
 	handshakeMsg := cli.handshakeMessage(infoHash)
 
@@ -341,7 +339,7 @@ func (cli TorrentClient) createBlockMessages(pieceIndex int, pieceLength int) ([
 	// fmt.Printf("%d %d\n", pieceLength, pieceLength / blockSize)
 	// numBlocks := (pieceLength + blockSize - 1) / blockSize
 	requestMessages := make([][]byte, 0)
-	fmt.Printf("piece-index: %d piece-length: %d \n", pieceIndex, pieceLength)
+	// fmt.Printf("piece-index: %d piece-length: %d \n", pieceIndex, pieceLength)
 	for i := 0; i < pieceLength; i += blockSize {
 		length := blockSize
 		if i+blockSize > pieceLength {
@@ -388,7 +386,7 @@ func (client TorrentClient) ReadBlock(conn net.Conn) (uint32, uint32, []byte, er
 }
 
 func (cli TorrentClient) DownloadBlock(conn net.Conn, pieceIndex int, blockMsg []byte, ch chan Block, wg *sync.WaitGroup) {
-	fmt.Printf("Download block\n")
+	fmt.Printf("Download block (pieceIndex: %d)\n", pieceIndex)
 	defer wg.Done()
 
 	err := cli.sendMessage(blockMsg, conn)
@@ -415,17 +413,19 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 	if err != nil {
 		return Piece{}, err
 	}
-	defer cli.closeConnection(desAddr)
+	defer cli.closeConnection(conn)
 
 	handshakeMsg := cli.handshakeMessage(infoHash)
 	err = cli.sendMessage(handshakeMsg, conn)
 	if err != nil {
 		return Piece{}, err
 	}
+
 	_, err = cli.readResponse(conn, make([]byte, 68))
 	if err != nil {
 		return Piece{}, err
 	}
+
 	_,_, err = cli.readMessage(conn)
 	if err != nil {
 		fmt.Println("Not found bitfield message type")
@@ -474,6 +474,33 @@ func (cli TorrentClient) DownloadPiece(desAddr string, infoHash []byte, info Tor
 	// fmt.Println("here4")
 	
 	return Piece{Data: data}, nil
+}
+
+func (cli TorrentClient) DownloadFile(torrent Torrent, peerAddr string) ([]byte, error) {
+	infoHash, err := torrent.CalculateInfoHash()
+	if err != nil {
+		return []byte{}, err
+	}
+
+	data := make([]byte, torrent.Info.Length)
+	bytesChunk := SplitBytes([]byte(torrent.Info.Pieces), 20)
+	fmt.Printf("Length: %d pieceLength: %d \n", torrent.Info.Length, torrent.Info.PieceLength)
+	for index,_ := range bytesChunk {
+		startIndex := index * torrent.Info.PieceLength
+		fmt.Printf("pieceIndex: %d byteIndex: %d\n", index, startIndex)
+		if startIndex >= torrent.Info.Length {
+			startIndex = torrent.Info.Length - (startIndex - 1) * torrent.Info.PieceLength
+		}
+
+		piece, err := cli.DownloadPiece(peerAddr, infoHash, torrent.Info, index)
+		if err != nil {
+			return []byte{}, err
+		}
+		
+		copy(data[startIndex:], piece.Data)
+	}
+
+	return data, nil
 }
 
 
@@ -605,6 +632,40 @@ func main() {
 
 		fmt.Printf("Piece %d downloaded to %s\n", pieceIndex, outputFilePath)
 		return
+	case "download":
+		outputFilePath := os.Args[3]
+		torrentFileName := os.Args[4]
+
+		torrent, err := ParseTorrentFile(torrentFileName)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		peers, err := torrent.GetPeers()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		
+		peer := peers[0]
+		peerAddr := fmt.Sprintf("%s:%d", peer.IP, peer.Port)
+
+		cli := NewClient("00112233445566778899")
+		data, err := cli.DownloadFile(torrent, peerAddr)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		file, err := os.Create(outputFilePath)
+		if err != nil {
+			panic(err)
+		}
+		defer file.Close()
+		file.Write(data)
+
+		fmt.Printf("Downloaded test.torrent to to %s\n", outputFilePath)
 	default:
 		fmt.Println("Unknown command: " + command)
 	}
