@@ -379,6 +379,7 @@ func (client TorrentClient) ReadBlock(conn net.Conn) (uint32, uint32, []byte, er
 		return 0, 0, nil, err
 	}
 
+	fmt.Printf("message length: %d \n", len(message))
 	pieceIndex := binary.BigEndian.Uint32(message[0:4])
 	begin := binary.BigEndian.Uint32(message[4:8])
 	block := message[8:]
