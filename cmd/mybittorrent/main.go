@@ -284,6 +284,7 @@ func (cli TorrentClient) readMessage(conn net.Conn) (byte, []byte, error) {
 		return 0, nil, err
 	}
 	length--
+	fmt.Printf("readMessageLength: %d \n", length)
 	message := make([]byte, length)
 	if _, err := io.ReadAtLeast(conn, message, int(length)); err != nil {
 		return 0, nil, err
